@@ -16,6 +16,7 @@ from .conversation_utils import (
 from .types import WebSocketSend
 from .tts_manager import TTSTaskManager
 from ..chat_history_manager import store_message
+from ..hekate_memory_manager import record_conversation_turn
 from ..service_context import ServiceContext
 
 # Import necessary types from agent outputs
@@ -158,6 +159,25 @@ async def process_single_conversation(
                 avatar=context.character_config.avatar,
             )
             logger.info(f"AI response: {full_response}")
+
+        if (
+            not skip_history
+            and full_response
+        ):
+            try:
+                logger.info(
+                    "Recording Hekate memory for "
+                    f"conf_uid={context.character_config.conf_uid}, "
+                    f"character_name={context.character_config.character_name}"
+                )
+                record_conversation_turn(
+                    user_text=input_text,
+                    assistant_text=full_response,
+                    conf_uid=context.character_config.conf_uid,
+                    history_uid=context.history_uid,
+                )
+            except Exception as e:
+                logger.error(f"Failed to record Hekate memory: {e}")
 
         return full_response  # Return accumulated full_response
 

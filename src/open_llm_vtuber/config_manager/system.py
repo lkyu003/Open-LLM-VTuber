@@ -10,6 +10,9 @@ class SystemConfig(I18nMixin):
     conf_version: str = Field(..., alias="conf_version")
     host: str = Field(..., alias="host")
     port: int = Field(..., alias="port")
+    live2d_lip_sync_rms_max: float = Field(
+        1.0, alias="live2d_lip_sync_rms_max"
+    )
     config_alts_dir: str = Field(..., alias="config_alts_dir")
     tool_prompts: Dict[str, str] = Field(..., alias="tool_prompts")
     enable_proxy: bool = Field(False, alias="enable_proxy")

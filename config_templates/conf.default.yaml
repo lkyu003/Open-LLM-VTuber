@@ -3,6 +3,7 @@ system_config:
   conf_version: 'v1.2.1'
   host: 'localhost' # use 0.0.0.0 if you want other devices to access this page
   port: 12393
+  live2d_lip_sync_rms_max: 1.0 # Final max value for Live2D mouth opening from RMS lip sync
   # New setting for alternative configurations
   config_alts_dir: 'characters'
   # Tool prompts that will be appended to the persona prompt
@@ -468,3 +469,13 @@ live_config:
     room_ids: [1991478060]
     # SESSDATA cookie value (optional, for authenticated requests)
     sessdata: ""
+  chzzk_live:
+    # Sample CHZZK live chat and inject one filtered message as user input every few seconds.
+    enabled: false
+    channel_id: ""
+    send_interval_sec: 20.0
+    reconnect_interval_sec: 15.0
+    recent_pool_size: 15
+    min_message_length: 2
+    max_message_length: 120
+    ignore_while_conversation_active: true

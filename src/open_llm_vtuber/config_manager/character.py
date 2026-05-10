@@ -10,6 +10,13 @@ from .tts_preprocessor import TTSPreprocessorConfig
 from .agent import AgentConfig
 
 
+class StylePromptConfig(I18nMixin):
+    """Optional prompt overlay for character speech style."""
+
+    enabled: bool = Field(default=False, alias="enabled")
+    file_path: str = Field(default="", alias="file_path")
+
+
 class CharacterConfig(I18nMixin):
     """Character configuration settings."""
 
@@ -20,6 +27,9 @@ class CharacterConfig(I18nMixin):
     human_name: str = Field(default="Human", alias="human_name")
     avatar: str = Field(default="", alias="avatar")
     persona_prompt: str = Field(..., alias="persona_prompt")
+    style_prompt: StylePromptConfig = Field(
+        default_factory=StylePromptConfig, alias="style_prompt"
+    )
     agent_config: AgentConfig = Field(..., alias="agent_config")
     asr_config: ASRConfig = Field(..., alias="asr_config")
     tts_config: TTSConfig = Field(..., alias="tts_config")

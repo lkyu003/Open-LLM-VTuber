@@ -9,6 +9,7 @@ system_config:
   conf_version: 'v1.2.1' # 配置文件版本
   host: 'localhost' # 服务器监听的地址，'0.0.0.0' 表示监听所有网络接口；如果需要安全，可以使用 '127.0.0.1'（仅本地访问）
   port: 12393 # 服务器监听的端口
+  live2d_lip_sync_rms_max: 1.0 # Live2D RMS 口型开合的最终上限
   config_alts_dir: 'characters' # 用于存放替代配置的目录
   tool_prompts: # 要插入到角色提示词中的工具提示词
     live2d_expression_prompt: 'live2d_expression_prompt' # 将追加到系统提示末尾，让 LLM（大型语言模型）包含控制面部表情的关键字。支持的关键字将自动加载到 `[<insert_emomap_keys>]` 的位置。
@@ -464,3 +465,13 @@ live_config:
     room_ids: [1991478060]
     # SESSDATA cookie值（可选，用于认证请求，可以查看发送弹幕用户名）
     sessdata: ""
+  chzzk_live:
+    # Sample CHZZK live chat and inject one filtered message as user input every few seconds.
+    enabled: false
+    channel_id: ""
+    send_interval_sec: 20.0
+    reconnect_interval_sec: 15.0
+    recent_pool_size: 15
+    min_message_length: 2
+    max_message_length: 120
+    ignore_while_conversation_active: true

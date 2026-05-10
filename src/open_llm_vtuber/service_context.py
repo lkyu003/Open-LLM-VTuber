@@ -445,6 +445,37 @@ class ServiceContext:
         """
         logger.debug(f"constructing persona_prompt: '''{persona_prompt}'''")
 
+        style_prompt = self.character_config.style_prompt
+        if style_prompt.enabled:
+            if not style_prompt.file_path:
+                logger.warning("Style prompt is enabled, but file_path is empty.")
+            else:
+                project_root = os.path.abspath(os.getcwd())
+                style_prompt_path = os.path.abspath(style_prompt.file_path)
+
+                if not (
+                    style_prompt_path == project_root
+                    or style_prompt_path.startswith(project_root + os.sep)
+                ):
+                    logger.warning(
+                        f"Style prompt path is outside project root: {style_prompt.file_path}"
+                    )
+                elif not os.path.isfile(style_prompt_path):
+                    logger.warning(
+                        f"Style prompt file not found: {style_prompt.file_path}"
+                    )
+                else:
+                    with open(style_prompt_path, encoding="utf-8") as prompt_file:
+                        style_prompt_content = prompt_file.read().strip()
+
+                    if style_prompt_content:
+                        persona_prompt += (
+                            "\n\n"
+                            "===== Character Speech Style Overlay =====\n"
+                            f"{style_prompt_content}\n"
+                            "===== End Character Speech Style Overlay =====\n"
+                        )
+
         for prompt_name, prompt_file in self.system_config.tool_prompts.items():
             if (
                 prompt_name == "group_conversation_prompt"

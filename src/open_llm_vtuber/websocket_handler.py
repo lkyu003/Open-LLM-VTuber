@@ -15,6 +15,7 @@ from .chat_group import (
 )
 from .message_handler import message_handler
 from .utils.stream_audio import prepare_audio_payload
+from .live.chzzk_live import ChzzkLiveChatSampler
 from .chat_history_manager import (
     create_new_history,
     get_history,
@@ -67,6 +68,7 @@ class WebSocketHandler:
         self.client_contexts: Dict[str, ServiceContext] = {}
         self.chat_group_manager = ChatGroupManager()
         self.current_conversation_tasks: Dict[str, Optional[asyncio.Task]] = {}
+        self.chzzk_live_tasks: Dict[str, asyncio.Task] = {}
         self.default_context_cache = default_context_cache
         self.received_data_buffers: Dict[str, np.ndarray] = {}
 
@@ -123,6 +125,10 @@ class WebSocketHandler:
                 websocket, client_uid, session_service_context
             )
 
+            await self._start_chzzk_live_sampler(
+                websocket, client_uid, session_service_context
+            )
+
             logger.info(f"Connection established for client {client_uid}")
 
         except Exception as e:
@@ -164,6 +170,9 @@ class WebSocketHandler:
                     "model_info": session_service_context.live2d_model.model_info,
                     "conf_name": session_service_context.character_config.conf_name,
                     "conf_uid": session_service_context.character_config.conf_uid,
+                    "live2d_config": {
+                        "lip_sync_rms_max": session_service_context.system_config.live2d_lip_sync_rms_max,
+                    },
                     "client_uid": client_uid,
                 }
             )
@@ -279,6 +288,8 @@ class WebSocketHandler:
 
     async def handle_disconnect(self, client_uid: str) -> None:
         """Handle client disconnection"""
+        await self._stop_chzzk_live_sampler(client_uid)
+
         group = self.chat_group_manager.get_client_group(client_uid)
         if group:
             await handle_group_interrupt(
@@ -317,6 +328,8 @@ class WebSocketHandler:
 
     async def _cleanup_failed_connection(self, client_uid: str) -> None:
         """Clean up failed connection data"""
+        await self._stop_chzzk_live_sampler(client_uid)
+
         self.client_connections.pop(client_uid, None)
         self.client_contexts.pop(client_uid, None)
         self.received_data_buffers.pop(client_uid, None)
@@ -329,6 +342,64 @@ class WebSocketHandler:
             self.current_conversation_tasks.pop(client_uid, None)
 
         message_handler.cleanup_client(client_uid)
+
+    async def _start_chzzk_live_sampler(
+        self,
+        websocket: WebSocket,
+        client_uid: str,
+        context: ServiceContext,
+    ) -> None:
+        """Start CHZZK live chat sampling for this client if configured."""
+        config = context.config.live_config.chzzk_live
+        if not config.enabled:
+            return
+
+        if not config.channel_id:
+            logger.warning("CHZZK live sampler is enabled, but channel_id is empty.")
+            return
+
+        await self._stop_chzzk_live_sampler(client_uid)
+
+        def is_conversation_active() -> bool:
+            task = self.current_conversation_tasks.get(client_uid)
+            return bool(task and not task.done())
+
+        async def inject_user_input(text: str) -> None:
+            if client_uid not in self.client_connections:
+                return
+            await self._handle_conversation_trigger(
+                websocket,
+                client_uid,
+                {
+                    "type": "text-input",
+                    "text": text,
+                    "images": None,
+                },
+            )
+
+        sampler = ChzzkLiveChatSampler(
+            channel_id=config.channel_id,
+            send_interval_sec=config.send_interval_sec,
+            reconnect_interval_sec=config.reconnect_interval_sec,
+            recent_pool_size=config.recent_pool_size,
+            min_message_length=config.min_message_length,
+            max_message_length=config.max_message_length,
+            ignore_while_conversation_active=config.ignore_while_conversation_active,
+            is_conversation_active=is_conversation_active,
+            inject_user_input=inject_user_input,
+        )
+
+        self.chzzk_live_tasks[client_uid] = asyncio.create_task(sampler.run())
+
+    async def _stop_chzzk_live_sampler(self, client_uid: str) -> None:
+        """Stop the CHZZK live chat sampler for a disconnected client."""
+        task = self.chzzk_live_tasks.pop(client_uid, None)
+        if task and not task.done():
+            task.cancel()
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
 
     async def broadcast_to_group(
         self, group_members: list[str], message: dict, exclude_uid: str = None
@@ -597,6 +668,9 @@ class WebSocketHandler:
                     "model_info": context.live2d_model.model_info,
                     "conf_name": context.character_config.conf_name,
                     "conf_uid": context.character_config.conf_uid,
+                    "live2d_config": {
+                        "lip_sync_rms_max": context.system_config.live2d_lip_sync_rms_max,
+                    },
                     "client_uid": client_uid,
                 }
             )

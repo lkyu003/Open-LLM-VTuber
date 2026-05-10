@@ -15,6 +15,7 @@ from ..stateless_llm.stateless_llm_interface import StatelessLLMInterface
 from ..stateless_llm.claude_llm import AsyncLLM as ClaudeAsyncLLM
 from ..stateless_llm.openai_compatible_llm import AsyncLLM as OpenAICompatibleAsyncLLM
 from ...chat_history_manager import get_history
+from ...hekate_memory_manager import load_memory_context
 from ..transformers import (
     sentence_divider,
     actions_extractor,
@@ -242,8 +243,33 @@ class BasicMemoryAgent(AgentInterface):
     def _to_messages(self, input_data: BatchInput) -> List[Dict[str, Any]]:
         """Prepare messages for LLM API call."""
         messages = self._memory.copy()
-        user_content = []
         text_prompt = self._to_text_prompt(input_data)
+        proactive_recall = bool(
+            input_data.metadata and input_data.metadata.get("proactive_speak", False)
+        )
+        external_memory_context = ""
+        try:
+            external_memory_context = load_memory_context(
+                text_prompt,
+                proactive_recall=proactive_recall,
+            )
+        except Exception as e:
+            logger.error(f"Failed to load Hekate memory context: {e}")
+
+        if external_memory_context:
+            messages.append(
+                {
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": f"[Hekate memory context]\n{external_memory_context}",
+                        }
+                    ],
+                }
+            )
+
+        user_content = []
         if text_prompt:
             user_content.append({"type": "text", "text": text_prompt})
 

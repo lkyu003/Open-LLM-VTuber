@@ -23,6 +23,7 @@ from .types import (
 )
 from ..service_context import ServiceContext
 from ..chat_history_manager import store_message
+from ..hekate_memory_manager import record_conversation_turn
 from .tts_manager import TTSTaskManager
 
 
@@ -289,16 +290,33 @@ async def handle_group_member_turn(
         state.conversation_history.append(ai_message)
         logger.info(f"Appended complete response: {ai_message}")
 
-        for member_uid in group_members:
-            member_context = client_contexts[member_uid]
-            store_message(
-                conf_uid=member_context.character_config.conf_uid,
-                history_uid=member_context.history_uid,
-                role="ai",
-                content=full_response,
-                name=context.character_config.character_name,
-                avatar=context.character_config.avatar,
-            )
+        skip_history = metadata and metadata.get("skip_history", False)
+        if not skip_history:
+            for member_uid in group_members:
+                member_context = client_contexts[member_uid]
+                store_message(
+                    conf_uid=member_context.character_config.conf_uid,
+                    history_uid=member_context.history_uid,
+                    role="ai",
+                    content=full_response,
+                    name=context.character_config.character_name,
+                    avatar=context.character_config.avatar,
+                )
+
+            try:
+                logger.info(
+                    "Recording Hekate group memory for "
+                    f"conf_uid={context.character_config.conf_uid}, "
+                    f"character_name={context.character_config.character_name}"
+                )
+                record_conversation_turn(
+                    user_text=new_context,
+                    assistant_text=full_response,
+                    conf_uid=context.character_config.conf_uid,
+                    history_uid=context.history_uid,
+                )
+            except Exception as e:
+                logger.error(f"Failed to record Hekate group memory: {e}")
         else:
             logger.debug("Skipping storing AI response to history (proactive speak)")
 

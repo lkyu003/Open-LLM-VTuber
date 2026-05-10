@@ -5,10 +5,8 @@ conf.yaml
 /backgrounds/*
 !/backgrounds/README.md
 
-# ignore non-default live2d models
-/live2d-models/*
-!/live2d-models/mao_pro
-!/live2d-models/shizuku
+# ignore local Live2D models
+/live2d-models/
 
 # ignore non-default character configs
 /characters/*
@@ -43,7 +41,10 @@ memory.db.bk
 
 # Logs
 server.log
-logs/*
+server.pid
+server.stdout.log
+server.stderr.log
+logs/
 
 # Cache and models
 cache/*
@@ -56,6 +57,9 @@ models/*
 !models/piper_voice
 models/piper_voice/*
 
+# Local model weights and voice references
+GPT-SoVITS-v2pro-20250604-nvidia50/
+
 
 # Legacy and specific directories
 legacy/
@@ -67,7 +71,14 @@ openapi_memgpt.json
 
 # memory log
 mem.json
+memory/
 conf.yaml.backup
+
+# Local backups and captured chat data
+*.zip
+chzzk_*.tsv
+chzzk_*_analysis.json
+chzzk_main.js
 
 *.exe
 
