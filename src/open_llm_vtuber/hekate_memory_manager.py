@@ -216,20 +216,59 @@ class MemoryRecord:
     assistant_text: str
 
 
-def ensure_memory_store() -> None:
+@dataclass(frozen=True)
+class MemoryStorePaths:
+    root: Path
+    short_term: Path
+    long_term: Path
+    flash: Path
+    reference: Path
+    emotion: Path
+    pruning: Path
+    index: Path
+    emotion_log: Path
+    prune_log: Path
+
+
+def _sanitize_memory_uid(conf_uid: str) -> str:
+    safe_uid = re.sub(r'[<>:"/\\|?*\x00-\x1f]', "_", (conf_uid or "").strip())
+    safe_uid = safe_uid.strip(". ")
+    return safe_uid or "_default"
+
+
+def get_memory_store_paths(conf_uid: str = "") -> MemoryStorePaths:
+    root = MEMORY_ROOT / _sanitize_memory_uid(conf_uid)
+    emotion = root / "emotion"
+    pruning = root / "pruning"
+    return MemoryStorePaths(
+        root=root,
+        short_term=root / "short-term",
+        long_term=root / "long-term",
+        flash=root / "flash",
+        reference=root / "reference",
+        emotion=emotion,
+        pruning=pruning,
+        index=root / "MEMORY_INDEX.md",
+        emotion_log=emotion / "emotion-log.md",
+        prune_log=pruning / "prune-log.md",
+    )
+
+
+def ensure_memory_store(conf_uid: str = "") -> MemoryStorePaths:
+    store = get_memory_store_paths(conf_uid)
     for directory in (
-        MEMORY_ROOT,
-        SHORT_TERM_DIR,
-        LONG_TERM_DIR,
-        FLASH_DIR,
-        REFERENCE_DIR,
-        EMOTION_DIR,
-        PRUNING_DIR,
+        store.root,
+        store.short_term,
+        store.long_term,
+        store.flash,
+        store.reference,
+        store.emotion,
+        store.pruning,
     ):
         directory.mkdir(parents=True, exist_ok=True)
 
-    if not INDEX_PATH.exists():
-        INDEX_PATH.write_text(
+    if not store.index.exists():
+        store.index.write_text(
             "# MEMORY_INDEX\n\n"
             "## Current Session Count\n"
             "- total_sessions: 0\n"
@@ -239,28 +278,32 @@ def ensure_memory_store() -> None:
             "## Flash Memories\n",
             encoding="utf-8",
         )
-    if not EMOTION_LOG_PATH.exists():
-        EMOTION_LOG_PATH.write_text("# Emotion Log\n", encoding="utf-8")
-    if not PRUNE_LOG_PATH.exists():
-        PRUNE_LOG_PATH.write_text("# Prune Log\n", encoding="utf-8")
+    if not store.emotion_log.exists():
+        store.emotion_log.write_text("# Emotion Log\n", encoding="utf-8")
+    if not store.prune_log.exists():
+        store.prune_log.write_text("# Prune Log\n", encoding="utf-8")
+    return store
 
 
 def load_memory_context(
     input_text: str = "",
     max_chars: int = 4000,
     proactive_recall: bool = False,
+    conf_uid: str = "",
 ) -> str:
     """Load keyword-relevant Hekate markdown memories for the next LLM turn."""
-    if not MEMORY_ROOT.exists():
+    store = get_memory_store_paths(conf_uid)
+    if not store.root.exists():
         return ""
 
-    ensure_memory_store()
+    ensure_memory_store(conf_uid)
     input_keywords = extract_keywords(input_text)
     selected_memories = _select_memories_for_input(
         input_keywords,
+        store,
         proactive_recall=proactive_recall,
     )
-    reference_memories = _select_reference_memories(input_keywords)
+    reference_memories = _select_reference_memories(input_keywords, store)
     selected_memories = [*reference_memories, *selected_memories]
 
     if not selected_memories:
@@ -314,8 +357,8 @@ def record_conversation_turn(
     if not user_text or not assistant_text:
         return None
 
-    ensure_memory_store()
-    session_number = _next_session_number()
+    store = ensure_memory_store(conf_uid)
+    session_number = _next_session_number(store)
     session_id = f"session-{session_number:04d}"
     today = datetime.now().strftime("%Y-%m-%d")
 
@@ -350,28 +393,28 @@ def record_conversation_turn(
         assistant_text=assistant_text,
     )
 
-    short_path = SHORT_TERM_DIR / f"{session_id}.md"
+    short_path = store.short_term / f"{session_id}.md"
     short_path.write_text(_render_session_log(record), encoding="utf-8")
 
     if promotion_candidate:
-        long_id = f"long-{_next_memory_number(LONG_TERM_DIR, 'long'):04d}"
-        long_path = LONG_TERM_DIR / f"{long_id}.md"
+        long_id = f"long-{_next_memory_number(store.long_term, 'long'):04d}"
+        long_path = store.long_term / f"{long_id}.md"
         long_path.write_text(
             _render_promoted_memory(record, long_id, conf_uid, history_uid),
             encoding="utf-8",
         )
 
     if flash_candidate:
-        flash_id = f"flash-{_next_memory_number(FLASH_DIR, 'flash'):04d}"
-        flash_path = FLASH_DIR / f"{flash_id}.md"
+        flash_id = f"flash-{_next_memory_number(store.flash, 'flash'):04d}"
+        flash_path = store.flash / f"{flash_id}.md"
         flash_path.write_text(
             _render_flash_memory(record, flash_id, conf_uid, history_uid),
             encoding="utf-8",
         )
 
-    prune_short_term_memories(max_files=SHORT_TERM_MAX_FILES)
-    _append_emotion_log(record)
-    _write_memory_index(session_number, record)
+    prune_short_term_memories(conf_uid=conf_uid, max_files=SHORT_TERM_MAX_FILES)
+    _append_emotion_log(record, store)
+    _write_memory_index(session_number, record, store)
 
     logger.info(
         f"Recorded Hekate memory {session_id} "
@@ -427,11 +470,14 @@ def extract_keywords(text: str, limit: int = 12) -> List[str]:
     ]
 
 
-def prune_short_term_memories(max_files: int = SHORT_TERM_MAX_FILES) -> List[Path]:
+def prune_short_term_memories(
+    max_files: int = SHORT_TERM_MAX_FILES,
+    conf_uid: str = "",
+) -> List[Path]:
     """Keep short-term memory bounded by deleting low-score older logs first."""
-    ensure_memory_store()
+    store = ensure_memory_store(conf_uid)
     entries = []
-    for path in _recent_markdown_files(SHORT_TERM_DIR, limit=10000):
+    for path in _recent_markdown_files(store.short_term, limit=10000):
         text = _read_if_exists(path)
         score = _extract_float(text, "emotion_score_total", default=0.0)
         session_number = _extract_session_number(path)
@@ -466,7 +512,7 @@ def prune_short_term_memories(max_files: int = SHORT_TERM_MAX_FILES) -> List[Pat
         except Exception as e:
             logger.error(f"Failed to prune short-term memory {path}: {e}")
 
-    with PRUNE_LOG_PATH.open("a", encoding="utf-8") as file:
+    with store.prune_log.open("a", encoding="utf-8") as file:
         file.write(f"\n## {datetime.now().isoformat(timespec='seconds')}\n")
         file.write(f"- reviewed: {len(entries)}\n")
         file.write(f"- max_files: {max_files}\n")
@@ -477,8 +523,8 @@ def prune_short_term_memories(max_files: int = SHORT_TERM_MAX_FILES) -> List[Pat
     return deleted_paths
 
 
-def run_short_term_pruning() -> None:
-    prune_short_term_memories(max_files=SHORT_TERM_MAX_FILES)
+def run_short_term_pruning(conf_uid: str = "") -> None:
+    prune_short_term_memories(conf_uid=conf_uid, max_files=SHORT_TERM_MAX_FILES)
 
 
 def _read_if_exists(path: Path) -> str:
@@ -496,9 +542,10 @@ def _recent_markdown_files(directory: Path, limit: int) -> List[Path]:
 
 def _select_memories_for_input(
     input_keywords: List[str],
+    store: MemoryStorePaths,
     proactive_recall: bool = False,
 ) -> List[Dict[str, object]]:
-    memories = _collect_memory_candidates()
+    memories = _collect_memory_candidates(store)
     if not memories:
         return []
 
@@ -545,13 +592,14 @@ def _select_memories_for_input(
 
 def _select_reference_memories(
     input_keywords: List[str],
+    store: MemoryStorePaths,
 ) -> List[Dict[str, object]]:
     if not input_keywords:
         return []
 
     keyword_set = set(input_keywords)
     matched = []
-    for memory in _collect_reference_memory_candidates():
+    for memory in _collect_reference_memory_candidates(store):
         overlap = keyword_set & set(memory["keywords"])
         if overlap:
             matched.append(
@@ -571,12 +619,12 @@ def _select_reference_memories(
     )
 
 
-def _collect_memory_candidates() -> List[Dict[str, object]]:
+def _collect_memory_candidates(store: MemoryStorePaths) -> List[Dict[str, object]]:
     candidates = []
     for kind, directory in (
-        ("long-term", LONG_TERM_DIR),
-        ("flash", FLASH_DIR),
-        ("short-term", SHORT_TERM_DIR),
+        ("long-term", store.long_term),
+        ("flash", store.flash),
+        ("short-term", store.short_term),
     ):
         for path in _recent_markdown_files(directory, limit=10000):
             text = _read_if_exists(path)
@@ -597,9 +645,11 @@ def _collect_memory_candidates() -> List[Dict[str, object]]:
     return candidates
 
 
-def _collect_reference_memory_candidates() -> List[Dict[str, object]]:
+def _collect_reference_memory_candidates(
+    store: MemoryStorePaths,
+) -> List[Dict[str, object]]:
     candidates = []
-    for path in _recent_markdown_files(REFERENCE_DIR, limit=10000):
+    for path in _recent_markdown_files(store.reference, limit=10000):
         if path.name.lower() == "readme.md":
             continue
         text = _read_if_exists(path)
@@ -695,9 +745,9 @@ def _trim(text: str, max_chars: int) -> str:
     return text[: max_chars - 3].rstrip() + "..."
 
 
-def _next_session_number() -> int:
+def _next_session_number(store: MemoryStorePaths) -> int:
     existing_numbers = []
-    for path in SHORT_TERM_DIR.glob("session-*.md"):
+    for path in store.short_term.glob("session-*.md"):
         match = re.search(r"session-(\d+)", path.stem)
         if match:
             existing_numbers.append(int(match.group(1)))
@@ -828,8 +878,8 @@ def _render_flash_memory(
     )
 
 
-def _append_emotion_log(record: MemoryRecord) -> None:
-    with EMOTION_LOG_PATH.open("a", encoding="utf-8") as file:
+def _append_emotion_log(record: MemoryRecord, store: MemoryStorePaths) -> None:
+    with store.emotion_log.open("a", encoding="utf-8") as file:
         file.write(f"\n## {record.session_id} - {record.date}\n")
         file.write(f"- dominant_emotion: {record.dominant_emotion}\n")
         file.write(f"- emotion_score_total: {record.emotion_score_total:.2f}\n")
@@ -837,10 +887,14 @@ def _append_emotion_log(record: MemoryRecord) -> None:
             file.write(f"- {emotion}: {record.emotion_index[emotion]:.2f}\n")
 
 
-def _write_memory_index(session_number: int, record: MemoryRecord) -> None:
-    long_files = _recent_markdown_files(LONG_TERM_DIR, 20)
-    flash_files = _recent_markdown_files(FLASH_DIR, 20)
-    short_files = _recent_markdown_files(SHORT_TERM_DIR, 20)
+def _write_memory_index(
+    session_number: int,
+    record: MemoryRecord,
+    store: MemoryStorePaths,
+) -> None:
+    long_files = _recent_markdown_files(store.long_term, 20)
+    flash_files = _recent_markdown_files(store.flash, 20)
+    short_files = _recent_markdown_files(store.short_term, 20)
 
     def render_files(files: Iterable[Path]) -> str:
         lines = []
@@ -848,7 +902,7 @@ def _write_memory_index(session_number: int, record: MemoryRecord) -> None:
             lines.append(f"- {path.stem}: {path.as_posix()}")
         return "\n".join(lines) if lines else "- none"
 
-    INDEX_PATH.write_text(
+    store.index.write_text(
         "# MEMORY_INDEX\n\n"
         "## Current Session Count\n"
         f"- total_sessions: {session_number}\n"

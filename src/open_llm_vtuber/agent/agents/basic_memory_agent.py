@@ -50,6 +50,7 @@ class BasicMemoryAgent(AgentInterface):
         tool_manager: Optional[ToolManager] = None,
         tool_executor: Optional[ToolExecutor] = None,
         mcp_prompt_string: str = "",
+        conf_uid: str = "",
     ):
         """Initialize agent with LLM and configuration."""
         super().__init__()
@@ -67,6 +68,7 @@ class BasicMemoryAgent(AgentInterface):
         self._tool_manager = tool_manager
         self._tool_executor = tool_executor
         self._mcp_prompt_string = mcp_prompt_string
+        self._conf_uid = conf_uid
         self._json_detector = StreamJSONDetector()
 
         self._formatted_tools_openai = []
@@ -252,6 +254,7 @@ class BasicMemoryAgent(AgentInterface):
             external_memory_context = load_memory_context(
                 text_prompt,
                 proactive_recall=proactive_recall,
+                conf_uid=self._conf_uid,
             )
         except Exception as e:
             logger.error(f"Failed to load Hekate memory context: {e}")

@@ -1,5 +1,8 @@
 # config_manager/character.py
-from pydantic import Field, field_validator
+from pathlib import Path
+from textwrap import dedent
+
+from pydantic import Field, field_validator, model_validator
 from typing import Dict, ClassVar
 from .i18n import I18nMixin, Description
 from .asr import ASRConfig
@@ -26,7 +29,7 @@ class CharacterConfig(I18nMixin):
     character_name: str = Field(default="", alias="character_name")
     human_name: str = Field(default="Human", alias="human_name")
     avatar: str = Field(default="", alias="avatar")
-    persona_prompt: str = Field(..., alias="persona_prompt")
+    persona_prompt: str = Field(default="", alias="persona_prompt")
     style_prompt: StylePromptConfig = Field(
         default_factory=StylePromptConfig, alias="style_prompt"
     )
@@ -79,13 +82,20 @@ class CharacterConfig(I18nMixin):
         ),
     }
 
-    @field_validator("persona_prompt")
-    def check_default_persona_prompt(cls, v):
-        if not v:
+    @model_validator(mode="after")
+    def load_persona_prompt_from_character_file(self):
+        prompt_path = Path("characters") / f"{self.conf_uid}.txt"
+        if prompt_path.is_file():
+            prompt_text = dedent(prompt_path.read_text(encoding="utf-8")).strip()
+            if prompt_text:
+                self.persona_prompt = prompt_text
+
+        if not self.persona_prompt:
             raise ValueError(
-                "Persona_prompt cannot be empty. Please provide a persona prompt."
+                "persona_prompt cannot be empty. Add it to the config or create "
+                f"{prompt_path.as_posix()}."
             )
-        return v
+        return self
 
     @field_validator("character_name")
     def set_default_character_name(cls, v, values):

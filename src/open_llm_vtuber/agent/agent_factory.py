@@ -83,6 +83,7 @@ class AgentFactory:
                 tool_manager=tool_manager,
                 tool_executor=tool_executor,
                 mcp_prompt_string=mcp_prompt_string,
+                conf_uid=kwargs.get("conf_uid", ""),
             )
 
         elif conversation_agent_choice == "mem0_agent":

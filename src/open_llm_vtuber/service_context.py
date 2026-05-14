@@ -391,6 +391,7 @@ class ServiceContext:
                 tool_manager=self.tool_manager,
                 tool_executor=self.tool_executor,
                 mcp_prompt_string=self.mcp_prompt,
+                conf_uid=self.character_config.conf_uid,
             )
 
             logger.debug(f"Agent choice: {agent_config.conversation_agent_choice}")
